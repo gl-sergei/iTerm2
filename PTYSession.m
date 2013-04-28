@@ -4126,6 +4126,79 @@ static long long timeInTenthsOfSeconds(struct timeval t)
     [[self tab] closeSession:self];
 }
 
+
+-(id)handleSplitScriptCommand: (NSScriptCommand *)command
+{
+    // Get the command's arguments:
+    NSDictionary *args = [command evaluatedArguments];
+    NSString *vertically = [args objectForKey:@"vertically"];
+    NSString *session = [args objectForKey:@"session"];
+    NSString *cmd = [args objectForKey:@"command"];
+    NSString *before = [args objectForKey:@"before"];
+    NSDictionary *abEntry;
+    PseudoTerminal *pty = [[self tab] realParentWindow];
+    
+    BOOL isVertical = TRUE;
+    if (vertically != nil && [vertically isEqualToString:@"NO"]) {
+        isVertical = FALSE;
+    }
+    
+    BOOL isBefore = TRUE;
+    if (before != nil && [before isEqualToString:@"NO"]) {
+        isBefore = FALSE;
+    }
+    
+    abEntry = [[ProfileModel sharedInstance] bookmarkWithName:session];
+    if (abEntry == nil) {
+        abEntry = [[ProfileModel sharedInstance] defaultBookmark];
+    }
+    if (abEntry == nil) {
+        NSMutableDictionary* aDict = [[[NSMutableDictionary alloc] init] autorelease];
+        [ITAddressBookMgr setDefaultsInBookmark:aDict];
+        [aDict setObject:[ProfileModel freshGuid] forKey:KEY_GUID];
+        abEntry = aDict;
+    }
+    
+    // If we have not set up a window, do it now
+    BOOL toggle = NO;
+    if ([pty windowInited] == NO) {
+        int windowType = [abEntry objectForKey:KEY_WINDOW_TYPE] ? [[abEntry objectForKey:KEY_WINDOW_TYPE] intValue] : WINDOW_TYPE_NORMAL;
+        if (windowType == WINDOW_TYPE_FULL_SCREEN) {
+            windowType = WINDOW_TYPE_NORMAL;
+            // TODO: this should work with fullscreen
+        }
+        [iTermController switchToSpaceInBookmark:abEntry];
+        [pty initWithSmartLayout:NO
+                       windowType:windowType
+                           screen:-1];
+        if ([[abEntry objectForKey:KEY_HIDE_AFTER_OPENING] boolValue]) {
+            [pty hideAfterOpening];
+        }
+        toggle = ([pty windowType] == WINDOW_TYPE_FULL_SCREEN) ||
+        ([pty windowType] == WINDOW_TYPE_LION_FULL_SCREEN);
+    }
+    
+    // launch the session!
+    PTYSession* newSession = [[pty newSessionWithBookmark:abEntry] autorelease];
+    [pty splitVertically:isVertical before:isBefore addingSession:newSession targetSession:self performSetup:YES];
+    
+    if (toggle) {
+        [pty delayedEnterFullscreen];
+    }
+    
+    if (command != nil) {
+        NSString *exe;
+        NSArray *arg;
+        
+        [cmd breakDownCommandToPath:&exe cmdArgs:&arg];
+        [newSession startProgram:exe arguments:arg environment:[NSDictionary dictionary] isUTF8:YES asLoginSession:NO];
+    }
+    
+    [[[[self tab] parentWindow] tabView] selectTabViewItemWithIdentifier:[newSession tab]];
+    
+    return newSession;
+}
+
 @end
 
 @implementation PTYSession (Private)
